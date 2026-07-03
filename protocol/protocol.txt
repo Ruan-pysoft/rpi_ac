@@ -1,0 +1,221 @@
+=== REQUEST & RESPONSE PROTOCOL ===
+
+VERSION 0
+
+Written by Ruan, but brainstormed with ChatGPT: https://chatgpt.com/share/6a478e08-d1d4-83ea-9b1d-e7978dbada5f
+
+== PURPOSE ==
+
+This is a protocol for my Python web server to talk to the apps it serves as a frontend for.
+
+The protocol is loosely based on HTTP, but greatly simplified, to ease implementation in languages like C and Odin.
+It also need not be as general-purpose as HTTP, but only needs to work for my own purposes.
+
+The idea is that the Python server receives requests from HTTP clients,
+and then simplifies and forwards them to the apps.
+The apps will then respond with HTML to be served to the clients.
+
+There can also be non-HTTP-equivalent requests & reponses for communication between the server and apps.
+
+== HIGH LEVEL LAYOUT ==
+
+All communications consist of a single request, followed by a single response. The socket is then closed.
+
+Each request and response consists of a header, optionally followed by a blank line and then its content ("body").
+
+If there is a protocol error in a request,
+the app should immediately give an appropriate response indicating that the request contained an error
+and then close the socket.
+
+If there is a protocol error in a response,
+the server should immediately close the socket.
+It MAY resend the request or otherwise try to recover,
+or it MAY instead display that there has been an error to the client.
+
+Each header will specify a content length. If the content length is not zero (0),
+then the request/response MUST contain a blank line followed by a body.
+To do otherwise is a protocol error.
+
+In other words: if the content length is zero,
+the header may or may not be followed by a single blank line,
+but after the blank line it may not contain any further contents.
+
+All lines SHOULD end with a single line feed (\n 0x0A),
+but implementations MUST also handle carriage-return followed by a line feed (\r\n 0x0D 0x0A)
+to allow debugging via telnet.
+
+Each line in a header should be ASCII encoded and contain only printable characters or spaces.
+That is, each line should contain only bytes in the range 0x20 to 0x7D (inclusive),
+except for the \n (0x0A) or \r\n (0x0D 0x0A) sequence at the end of the line.
+Any other bytes present in a header is a protocol error.
+
+Each line in a header MUST NOT contain leading or trailing spaces;
+if it does it is a protocol error,
+though apps or the server MAY instead strip off leading/trailing spaces.
+
+Each line of a header MUST NOT exceed 4096 bytes (excluding the newline);
+doing so is a protocol error.
+
+== REQUEST FORMAT ==
+
+A request is sent from the web server to an app.
+
+A header consists of exactly five lines:
+
+ 1. A line consisting of the magic header
+ 2. A line consisting of the request type
+ 3. A line consisting of the request path
+ 4. A line consisting of the body's MIMETYPE, or blank
+ 5. A line containing the content length
+
+= MAGIC HEADER =
+
+The magic header must contain the prefix "RRPROT/" followed by a single integer indicating the protocol version.
+For version 1 the magic header is "RRPROT/0".
+
+If the magic header is not present or is erroneous, it is a protocol error.
+If the magic header indicates a protocol version older than what is supported by the app, it is a protocol error.
+If the magic header indicates a protocol version newer than what is supported by the app,
+it should immediately respond with a response indicating the newest supported version of the protocol and close the socket.
+
+Apps SHOULD NOT assume that the version is a single digit and assume that a magic header longer than eight bytes is erroneous.
+Apps MAY assume that if the prefix is correct and the magic header is longer than eight bytes,
+that a valid protocol version >= 10 is indicated.
+(ie. apps don't need to check that the version is a valid integer if it is longer than one byte)
+
+= REQUEST TYPE =
+
+The following request types are supported:
+
+GET  -- a forwarded HTTP GET request (path required)
+POST -- a forwarded HTTP POST request (path required)
+PING -- a ping request to check if the app is responsive (path not required)
+
+For forwarded HTTP requests, an app should respond with a CONTENT response.
+For a PING request, an app should respond with a PONG response.
+
+= REQUEST PATH =
+
+The request path MUST be empty when it is not relevant (eg. for a PING request),
+otherwise it is a protocol error.
+
+An empty path is a valid path when a path is required.
+
+A path MUST NOT contain any leading or trailing slashes;
+instead the server MUST normalise paths by removing leading/trailing slashes before sending it to an app.
+(so "/foo" -> "foo" and "bar/" -> "bar")
+
+Paths MUST be relative to app root.
+So if an app is, for example, served on "localhost/app" by the server,
+if a client requests "localhost/app/foo", the path must be some variant of "foo" and NOT of "app/foo".
+
+= MIMETYPE =
+
+A standard MIMETYPE, blank, or "application/x-rrprot-kv".
+
+If the MIMETYPE is blank, then the content length MUST be 0,
+otherwise it is a protocol error.
+
+application/x-rrprot-kv indicates that the protocol's custom key-value format is used for the content.
+
+= CONTENT LENGTH =
+
+The content length comes in one of two formats:
+
+ 1. An explicit length indicated by a single nonnegative integer, indicating the length of the body in bytes
+ 2. An indeterminate length indicated by "application/x-rrprot-kv", optionally followed by a single space and a sentinel value
+
+Indeterminate lengths are meant for debugging (manually connecting over telnet).
+Apps and the server SHOULD only ever send explicit lengths.
+
+The sentinel value consists of any number of printable ASCII characters, not including a space.
+If the sentinel value contains a byte outside the range 0x21 to 0x7D (inclusive), it is a protocol error.
+
+In the second case, the content length is not known beforehand.
+If no sentinel value is provided, the app will read from the provided body until an EOF is encountered.
+
+If a sentinel value is provided, the app will read from the provided body until the sentinel value is encountered on a separate line with no leading or trailing whitespace.
+That is, the sentinel value must be directly preceded by either \r\n or \n,
+and directly followed by either \r\n or \n
+(with the leading and trailing line endings being identical).
+Neither the leading nor trailing line endings are included in the body.
+
+== RESPONSE FORMAT ==
+
+A response is sent from an app to the web server.
+
+A header consists of exactly four lines:
+
+ 1. A line consisting of the response type
+ 2. A line consisting of a status (format dependent on response type)
+ 3. A line consisting of the body's MIMETYPE, or blank
+ 4. A line containing the content length
+
+= RESPONSE TYPE =
+
+The following response types are supported:
+
+CONTENT -- content returned in response to an HTTP request
+PONG    -- response to a PING request
+VERSION -- request to change protocol version
+ERROR   -- notification of a protocol error
+
+Note: ERROR MUST only be used to report protocol errors.
+Application errors should instead be reported via a CONTENT response with the appropriate HTTP status.
+
+= STATUS =
+
+The status line's format depends on the response type.
+
+CONTENT: any valid HTTP status
+PONG:    blank
+VERSION: the magic header of the requested protocol version
+ERROR:   blank
+
+= MIMETYPE =
+
+See REQUEST FORMAT > MIMETYPE
+
+If the MIMETYPE is application/x-rrprot-kv the content should be transformed into url encoded format before being forwarded to clients and the MIMETYPE should be set to application/x-www-form-urlencoded for clients.
+
+= CONTENT LENGTH =
+
+See REQUEST FORMAT > CONTENT LENGTH
+
+Apps MUST use a specified rather than indeterminate content length,
+and so the server MAY treat an indeterminate content length as a protocol error,
+though handling it is recommended for debugging purposes.
+
+= BODY =
+
+CONTENT: anything; forwarded to client
+PONG:    the same as the body of the incoming PING
+VERSION: blank
+ERROR:   text/plain with some error message or blank
+
+== KEY-VALUE FORMAT ==
+
+Bodies with MIMETYPE application/x-rrprot-kv should be in this format.
+
+As in headers, all lines SHOULD end with a single line feed but implementations MUST also handle \r\n sequences.
+
+As in headers, all metadata lines MUST contain only ASCII printable characters or spaces.
+
+As in headers, all metadata lines MUST NOT contain leading or trailing spaces.
+
+Values can contain arbitrary bytes.
+
+
+Each key-value pair consists of three lines followed by a blank line or EOF:
+ 1. The key. This is a metadata line; a key MAY contain spaces internally.
+ 2. A single nonnegative integer specifying the length of the value in bytes. This is a metadata line.
+ 3. The value.
+
+The last key-value pair MAY be followed by a blank line as well, but this blank line MUST be immediately followed by an EOF.
+
+NB: EOF here refers to the end of the body's content, rather than literally closing the socket.
+
+Note that since the value's length in bytes is specified, it may contain newlines internally.
+It is still considered a line though,
+so it must still end with a newline
+(which is not counted towards its length in bytes).
