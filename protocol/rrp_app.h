@@ -271,7 +271,7 @@ int request_recv(int sock, struct Request *req) {
 		memmove(
 			buf.buf,
 			&buf.buf[2],
-			buf.buf_len-1
+			buf.buf_len
 		);
 	}
 
