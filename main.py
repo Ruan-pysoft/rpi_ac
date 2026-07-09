@@ -1,15 +1,22 @@
 #!/bin/python3
 
 import http.server as hs
-from multiprocessing import Value
-import time
+# import time
 
-
-request_no = Value("i", 0)
+from protocol import rrp_server as rrp
 
 
 class RqH(hs.BaseHTTPRequestHandler):
     def do_GET(self):
+        req = rrp.Request(
+            rtype=rrp.RequestType.GET,
+            path=rrp.RequestPath(self.path),
+            mimetype=None,
+            body=b"",
+        )
+
+        print(req)
+
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
         self.end_headers()
