@@ -65,14 +65,17 @@ RecvError :: union { net.TCP_Recv_Error, ProtocolError }
 
 @(private="file")
 _buf_recv :: proc(sock: net.TCP_Socket, buf: ^[dynamic]u8) -> (bytes_read: int, err: net.TCP_Recv_Error) {
-	if len(buf) == cap(buf) {
-		reserve(buf, cap(buf)*2 if cap(buf) != 0 else 1024)
-	}
+	old_len := len(buf)
+	if cap(buf) == 0 do reserve(buf, 1024)
+	resize(buf, cap(buf) if cap(buf) > old_len else 2*cap(buf))
 
-	bytes_read = net.recv_tcp(sock, buf[len(buf):]) or_return
-	resize(buf, len(buf)+bytes_read)
+	bytes_read = net.recv_tcp(
+		sock,
+		buf[old_len:]
+	) or_return
+	resize(buf, old_len+bytes_read)
 
-	return
+	return bytes_read, nil
 }
 
 MAX_HEADER_LINE_LEN :: 4096
@@ -88,7 +91,7 @@ _header_line_recv :: proc(sock: net.TCP_Socket, buf: ^[dynamic]u8) -> (line: str
 		line_len < len(buf);
 		line_len += 1
 	{
-		if buf[len(buf)-1] == '\n' {
+		if buf[line_len] == '\n' {
 			found_newline = true
 			break
 		}
@@ -105,7 +108,7 @@ _header_line_recv :: proc(sock: net.TCP_Socket, buf: ^[dynamic]u8) -> (line: str
 			line_len < len(buf);
 			line_len += 1
 		{
-			if buf[len(buf)-1] == '\n' {
+			if buf[line_len] == '\n' {
 				found_newline = true
 				break
 			}
@@ -123,10 +126,13 @@ _header_line_recv :: proc(sock: net.TCP_Socket, buf: ^[dynamic]u8) -> (line: str
 		}
 	}
 
-	line = cast(string) buf[:line_len]
+	line = str.clone(cast(string) buf[:line_len])
 
 	new_len := len(buf) - (line_len+newline_len)
-	mem.copy(&buf[0], &buf[line_len + newline_len], new_len)
+	if new_len > 0 do mem.copy(
+		&buf[0], &buf[line_len + newline_len],
+		new_len,
+	)
 	resize(buf, new_len)
 
 	return line, nil
@@ -214,10 +220,16 @@ request_recv :: proc(sock: net.TCP_Socket) -> (req: Request, err: RecvError) {
 	}
 
 	if buf[0] == '\n' {
-		mem.copy(&buf[0], &buf[1], len(buf)-1)
+		if len(buf) > 1 do mem.copy(
+			&buf[0], &buf[1],
+			len(buf)-1,
+		)
 		resize(&buf, len(buf)-1)
 	} else {
-		mem.copy(&buf[0], &buf[2], len(buf)-2)
+		if len(buf) > 2 do mem.copy(
+			&buf[0], &buf[2],
+			len(buf)-2,
+		)
 		resize(&buf, len(buf)-1)
 	}
 
@@ -279,7 +291,7 @@ response_from_protocol_error_str :: proc(error_str: string) -> Response {
 	return {
 		type = .ERROR,
 		status = "",
-		mimetype = "text/plain",
+		mimetype = str.clone("text/plain"),
 		body = body,
 	}
 }
@@ -303,6 +315,20 @@ response_lower_version :: proc() -> Response {
 		status = version_header,
 		mimetype = {},
 		body = {},
+	}
+}
+response_from_ping :: proc(req: Request) -> Response {
+	assert(req.type == .PING)
+
+	mimetype, ok := req.mimetype.?
+	body := make([dynamic]u8, len(req.body))
+	copy(body[:], req.body[:])
+
+	return {
+		type = .PONG,
+		status = "",
+		mimetype = ok ? str.clone(mimetype) : nil,
+		body = body,
 	}
 }
 
@@ -336,7 +362,7 @@ response_send :: proc(sock: net.TCP_Socket, res: Response) -> (err: net.TCP_Send
 
 	if len(res.body) != 0 {
 		_write_char(sock, '\n') or_return
-		net.send_tcp(sock, res.body[:]) or_return
+		bytes := net.send_tcp(sock, res.body[:]) or_return
 	}
 
 	return nil

@@ -1,4 +1,4 @@
-package test_client
+package test_app
 
 import "base:runtime"
 
@@ -29,33 +29,45 @@ get_runfile :: proc(filename: string) -> string {
 handle_connection :: proc(sock: net.TCP_Socket) {
 	defer net.close(sock)
 
-	buf: [1024]byte
+	req, req_err := protocol.request_recv(sock)
+	if req_err != nil {
+		fmt.printfln("got error receiving request: {}", req_err)
 
-	for {
-		bytes_recvd, err_recv := net.recv_tcp(sock, buf[:])
-		if err_recv != nil {
-			fmt.println("got error reading from socket")
+		switch err in req_err {
+		case protocol.ProtocolError:
+			fmt.printfln(
+				"protocol error: {}",
+				protocol.ProtocolErrorMap[err],
+			)
+
+			resp := protocol.response_from_protocol_error(err)
+			defer {
+				protocol.response_delete(&resp)
+			}
+			_ = protocol.response_send(sock, resp)
+		case net.TCP_Recv_Error:
+		}
+
+		return
+	}
+	defer protocol.request_delete(&req)
+
+	switch req.type {
+	case .GET: panic("not implemented")
+	case .POST: panic("not implemented")
+	case .PING:
+		resp := protocol.response_from_ping(req)
+		defer protocol.response_delete(&resp)
+
+		err := protocol.response_send(sock, resp)
+		if err != nil {
+			fmt.printfln("Error sending response: {}", err)
 			return
 		}
-		received := buf[:bytes_recvd]
-		if len(received) == 0 {
-			fmt.println("Disconnecting client")
-			break
-		}
-
-		fmt.printfln("Server received [ %d bytes ]: %s", len(received), received)
-		bytes_sent, err_send := net.send_tcp(sock, received)
-		if err_send != nil {
-			fmt.println("failed sending to socket")
-		}
-		sent := received[:bytes_sent]
-		fmt.printfln("Server sent [ %d bytes ]: %s", len(sent), sent)
 	}
 }
 
 main :: proc() {
-	fmt.println("Hello, world!")
-
 	sockfname := get_runfile("rrp_test_app.sock")
 	defer delete(sockfname)
 	sockaddr := unix.make_unix_address(sockfname)
@@ -72,12 +84,12 @@ main :: proc() {
 	fmt.printfln("Listening on TCP: {}", cstring(transmute([^]u8) &sockaddr.sun_path))
 
 	for {
-		cli, source, err_accept := unix.unix_accept_tcp(sock)
+		cli, _, err_accept := unix.unix_accept_tcp(sock)
 		if err_accept != nil {
 			fmt.println("Failed to accept TCP connection")
 			continue
 		}
-		fmt.printfln("Accepted TCP connection from `{}`", cstring(transmute([^]u8) &source.sun_path))
+		fmt.println("Accepted TCP connection")
 		thread.create_and_start_with_poly_data(cli, handle_connection)
 	}
 }
