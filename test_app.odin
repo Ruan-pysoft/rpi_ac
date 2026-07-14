@@ -53,7 +53,24 @@ handle_connection :: proc(sock: net.TCP_Socket) {
 	defer protocol.request_delete(&req)
 
 	switch req.type {
-	case .GET: panic("not implemented")
+	case .GET:
+		body := fmt.aprintf(
+			"<h1>Hello from the app!</h1>\n" +
+			"<p>You're accessing the resource at <kbd>{}</kbd>.</p>\n",
+			req.path
+		)
+		resp := protocol.Response {
+			mimetype = str.clone("text/html"),
+			status = str.clone("200 OK"),
+			body = transmute([]u8) body,
+		}
+		defer protocol.response_delete(&resp)
+
+		err := protocol.response_send(sock, resp)
+		if err != nil {
+			fmt.printfln("Error sending response: {}", err)
+			return
+		}
 	case .POST: panic("not implemented")
 	case .PING:
 		resp := protocol.response_from_ping(req)

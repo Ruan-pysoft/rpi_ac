@@ -272,7 +272,7 @@ Response :: struct {
 	type: ResponseType,
 	status: string,
 	mimetype: Maybe(string),
-	body: [dynamic]u8,
+	body: []u8,
 }
 
 response_delete :: proc(response: ^Response) {
@@ -285,8 +285,7 @@ response_delete :: proc(response: ^Response) {
 }
 
 response_from_protocol_error_str :: proc(error_str: string) -> Response {
-	body: [dynamic]u8
-	resize(&body, len(error_str))
+	body := make([]u8, len(error_str))
 	mem.copy_non_overlapping(&body[0], raw_data(error_str), len(error_str))
 	return {
 		type = .ERROR,
@@ -321,8 +320,8 @@ response_from_ping :: proc(req: Request) -> Response {
 	assert(req.type == .PING)
 
 	mimetype, ok := req.mimetype.?
-	body := make([dynamic]u8, len(req.body))
-	copy(body[:], req.body[:])
+	body := make([]u8, len(req.body))
+	copy(body, req.body[:])
 
 	return {
 		type = .PONG,

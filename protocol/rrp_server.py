@@ -24,6 +24,9 @@ class RequestPath:
     def __str__(self) -> str:
         return self.path
 
+    def __repr__(self) -> str:
+        return f"RequestPath({self.path!r})"
+
 
 @dataclass
 class Request:
