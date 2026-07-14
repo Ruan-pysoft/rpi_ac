@@ -96,5 +96,5 @@ class RqH(hs.BaseHTTPRequestHandler):
     '''
 
 
-with hs.ThreadingHTTPServer(("", 4402), RqH) as server:
+with hs.ThreadingHTTPServer(("192.168.0.165", 4402), RqH) as server:
     server.serve_forever()

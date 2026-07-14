@@ -55,7 +55,7 @@ struct Response {
 
 struct Response response_from_protocol_error(const char *errstr);
 struct Response response_lower_version(void);
-struct Response response_from_ping(const struct Request &req);
+struct Response response_from_ping(const struct Request *req);
 
 // TODO: add some sort of response_validate to check if type, status, mimetype are conforming to spec
 
@@ -345,13 +345,13 @@ struct Response response_lower_version(void) {
 		.body = NULL,
 	};
 }
-struct Response response_from_ping(const struct Request &req) {
+struct Response response_from_ping(const struct Request *req) {
 	return (struct Response) {
 		.type = RST_PONG,
 		.status = "",
-		.mimetype = req.mimetype,
-		.content_length = req.content_length,
-		.body = req.body,
+		.mimetype = req->mimetype,
+		.content_length = req->content_length,
+		.body = req->body,
 	};
 }
 
