@@ -83,7 +83,7 @@ def fan_get(self: hs.BaseHTTPRequestHandler, base: str, path: str):
         self.send_header('Content-type', 'text/html')
         self.end_headers()
 
-        write_intro(self, title="Fan Interface")
+        write_intro(self, title=b"Fan Interface")
         self.wfile.writelines((
             resp.body,
         ))
